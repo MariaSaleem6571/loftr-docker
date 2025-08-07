@@ -1,0 +1,9 @@
+torch==2.2.2+cpu
+--extra-index-url https://download.pytorch.org/whl/cpu
+kornia==0.7.1
+kornia-rs
+kornia_moons
+opencv-python
+matplotlib
+numpy==1.26.4    
+
