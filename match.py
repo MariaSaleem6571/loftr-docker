@@ -1,12 +1,10 @@
 import cv2
 import kornia as K
 import kornia.feature as KF
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import os
 import pandas as pd
-from kornia_moons.viz import draw_LAF_matches
 import uuid
 
 def load_image_cv(path):
@@ -32,9 +30,6 @@ for i in range(len(image_files) - 1):
     img1 = load_image_cv(fname1)
     img2 = load_image_cv(fname2)
 
-    img1 = K.geometry.resize(img1, (600, 375), antialias=True)
-    img2 = K.geometry.resize(img2, (600, 375), antialias=True)
-
     input_dict = {
         "image0": K.color.rgb_to_grayscale(img1),
         "image1": K.color.rgb_to_grayscale(img2),
@@ -53,10 +48,13 @@ for i in range(len(image_files) - 1):
 
     if H is not None:
         H4 = np.eye(4)
-        H4[:3, :3] = H
-        H4[:3, 3] = [0, 0, 0] 
+        # Correct embedding from 3x3 to 4x4
+        H4[0, 0], H4[0, 1], H4[0, 2], H4[0, 3] = H[0, 0], H[0, 1], 0, H[0, 2]
+        H4[1, 0], H4[1, 1], H4[1, 2], H4[1, 3] = H[1, 0], H[1, 1], 0, H[1, 2]
+        H4[2, 0], H4[2, 1], H4[2, 2], H4[2, 3] = 0,       0,       1, 0
+        H4[3, 0], H4[3, 1], H4[3, 2], H4[3, 3] = H[2, 0], H[2, 1], 0, H[2, 2]
     else:
-        H4 = np.eye(4)  
+        H4 = np.eye(4)
 
     pair_id = f"{image_files[i].replace('.png','')}_{image_files[i+1].replace('.png','')}"
 
