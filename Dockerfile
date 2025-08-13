@@ -29,6 +29,6 @@ RUN pip install --upgrade pip && pip install --root-user-action=ignore -r requir
 USER appuser
 
 #CMD ["python", "match.py"]
-CMD ["python", "homography_batch.py"]
+CMD ["python", "match.py"]
 
 

@@ -65,7 +65,6 @@ for i in range(len(image_files) - 1):
     else:
         print(f"Not enough matches for {image_files[i+1]} → {image_files[i]}")
 
-# Save to CSV
 df = pd.DataFrame(results)
 df.to_csv(output_csv, index=False)
 print(f"Homographies saved to {output_csv}")

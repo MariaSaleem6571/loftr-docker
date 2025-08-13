@@ -54,9 +54,9 @@ for i in range(len(image_files) - 1):
     if H is not None:
         H4 = np.eye(4)
         H4[:3, :3] = H
-        H4[:3, 3] = [0, 0, 0]  # no translation from 2D points
+        H4[:3, 3] = [0, 0, 0] 
     else:
-        H4 = np.eye(4)  # fallback identity
+        H4 = np.eye(4)  
 
     pair_id = f"{image_files[i].replace('.png','')}_{image_files[i+1].replace('.png','')}"
 
@@ -72,7 +72,7 @@ for i in range(len(image_files) - 1):
     }
     results.append(row)
 
-csv_path = os.path.join(output_dir, "homographies_loftr.csv")
+csv_path = os.path.join(output_dir, "homographies_loftr_batch2.csv")
 df = pd.DataFrame(results)
 df.to_csv(csv_path, index=False)
 print(f"Homography CSV saved at: {csv_path}")
