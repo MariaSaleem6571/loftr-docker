@@ -48,7 +48,6 @@ for i in range(len(image_files) - 1):
 
     if H is not None:
         H4 = np.eye(4)
-        # Correct embedding from 3x3 to 4x4
         H4[0, 0], H4[0, 1], H4[0, 2], H4[0, 3] = H[0, 0], H[0, 1], 0, H[0, 2]
         H4[1, 0], H4[1, 1], H4[1, 2], H4[1, 3] = H[1, 0], H[1, 1], 0, H[1, 2]
         H4[2, 0], H4[2, 1], H4[2, 2], H4[2, 3] = 0,       0,       1, 0
