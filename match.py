@@ -17,21 +17,16 @@ def load_image_cv(path):
     img_tensor = torch.from_numpy(img_cv).permute(2, 0, 1).unsqueeze(0).float() / 255.0
     return img_tensor
 
-# Prepare
 image_dir = "images"
 output_dir = "output"
 os.makedirs(output_dir, exist_ok=True)
 
-# Collect sorted image list
 image_files = sorted(f for f in os.listdir(image_dir) if f.endswith(".png"))
 
-# Initialize matcher
 matcher = KF.LoFTR(pretrained="outdoor")
 
-# Results to collect
 results = []
 
-# Loop through consecutive image pairs
 for i in range(len(image_files) - 1):
     fname1 = os.path.join(image_dir, image_files[i])
     fname2 = os.path.join(image_dir, image_files[i + 1])
@@ -53,7 +48,6 @@ for i in range(len(image_files) - 1):
     mkpts0 = correspondences["keypoints0"].cpu().numpy()
     mkpts1 = correspondences["keypoints1"].cpu().numpy()
 
-    # F matrix + inliers
     if len(mkpts0) >= 8:
         Fm, inliers = cv2.findFundamentalMat(mkpts0, mkpts1, cv2.USAC_MAGSAC, 0.5, 0.999, 100000)
         inliers = inliers > 0
@@ -68,7 +62,6 @@ for i in range(len(image_files) - 1):
 
     print(f"{image_files[i]} ↔ {image_files[i + 1]} — Inliers: {num_inliers}/{total_matches} ({inlier_ratio:.2%})")
 
-    # Save visualization
     fig = plt.figure()
     draw_LAF_matches(
         KF.laf_from_center_scale_ori(
@@ -97,7 +90,6 @@ for i in range(len(image_files) - 1):
     plt.savefig(out_img_path, dpi=300)
     plt.close(fig)
 
-    # Append result
     results.append({
         "pair_id": pair_id,
         "image_1": image_files[i],
@@ -107,7 +99,6 @@ for i in range(len(image_files) - 1):
         "inlier_ratio_percent": round(inlier_ratio * 100, 2)
     })
 
-# Save all results to CSV
 csv_path = os.path.join(output_dir, "inlier_results.csv")
 df = pd.DataFrame(results)
 df.to_csv(csv_path, index=False)
