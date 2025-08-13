@@ -7,9 +7,9 @@ import torch
 import os
 import pandas as pd
 from kornia_moons.viz import draw_LAF_matches
+import uuid
 
 def load_image_cv(path):
-    print("Loading:", path)
     img_cv = cv2.imread(path, cv2.IMREAD_COLOR)
     if img_cv is None:
         raise FileNotFoundError(f"Image not found at {path}")
@@ -22,9 +22,7 @@ output_dir = "output"
 os.makedirs(output_dir, exist_ok=True)
 
 image_files = sorted(f for f in os.listdir(image_dir) if f.endswith(".png"))
-
 matcher = KF.LoFTR(pretrained="outdoor")
-
 results = []
 
 for i in range(len(image_files) - 1):
@@ -48,59 +46,33 @@ for i in range(len(image_files) - 1):
     mkpts0 = correspondences["keypoints0"].cpu().numpy()
     mkpts1 = correspondences["keypoints1"].cpu().numpy()
 
-    if len(mkpts0) >= 8:
-        Fm, inliers = cv2.findFundamentalMat(mkpts0, mkpts1, cv2.USAC_MAGSAC, 0.5, 0.999, 100000)
-        inliers = inliers > 0
-        num_inliers = inliers.sum()
-        total_matches = len(inliers)
-        inlier_ratio = num_inliers / total_matches
+    if len(mkpts0) >= 4:
+        H, _ = cv2.findHomography(mkpts1, mkpts0, cv2.RANSAC, 5.0)
     else:
-        inliers = np.zeros(len(mkpts0), dtype=bool)
-        num_inliers = 0
-        total_matches = len(mkpts0)
-        inlier_ratio = 0.0
+        H = None
 
-    print(f"{image_files[i]} ↔ {image_files[i + 1]} — Inliers: {num_inliers}/{total_matches} ({inlier_ratio:.2%})")
+    if H is not None:
+        H4 = np.eye(4)
+        H4[:3, :3] = H
+        H4[:3, 3] = [0, 0, 0]  # no translation from 2D points
+    else:
+        H4 = np.eye(4)  # fallback identity
 
-    fig = plt.figure()
-    draw_LAF_matches(
-        KF.laf_from_center_scale_ori(
-            torch.from_numpy(mkpts0).view(1, -1, 2),
-            torch.ones(mkpts0.shape[0]).view(1, -1, 1, 1),
-            torch.ones(mkpts0.shape[0]).view(1, -1, 1),
-        ),
-        KF.laf_from_center_scale_ori(
-            torch.from_numpy(mkpts1).view(1, -1, 2),
-            torch.ones(mkpts1.shape[0]).view(1, -1, 1, 1),
-            torch.ones(mkpts1.shape[0]).view(1, -1, 1),
-        ),
-        torch.arange(mkpts0.shape[0]).view(-1, 1).repeat(1, 2),
-        K.tensor_to_image(img1),
-        K.tensor_to_image(img2),
-        inliers,
-        draw_dict={
-            "inlier_color": (0.2, 1, 0.2),
-            "tentative_color": None,
-            "feature_color": (0.2, 0.5, 1),
-            "vertical": False,
-        },
-    )
     pair_id = f"{image_files[i].replace('.png','')}_{image_files[i+1].replace('.png','')}"
-    out_img_path = os.path.join(output_dir, f"match_{pair_id}.png")
-    plt.savefig(out_img_path, dpi=300)
-    plt.close(fig)
 
-    results.append({
+    row = {
+        "uuid": str(uuid.uuid4()),
+        "image1_index": i + 1,
+        "image2_index": i + 2,
         "pair_id": pair_id,
-        "image_1": image_files[i],
-        "image_2": image_files[i+1],
-        "total_matches": total_matches,
-        "inlier_matches": num_inliers,
-        "inlier_ratio_percent": round(inlier_ratio * 100, 2)
-    })
+        "r11": H4[0, 0], "r12": H4[0, 1], "r13": H4[0, 2], "tx": H4[0, 3],
+        "r21": H4[1, 0], "r22": H4[1, 1], "r23": H4[1, 2], "ty": H4[1, 3],
+        "r31": H4[2, 0], "r32": H4[2, 1], "r33": H4[2, 2], "tz": H4[2, 3],
+        "h41": H4[3, 0], "h42": H4[3, 1], "h43": H4[3, 2], "h44": H4[3, 3],
+    }
+    results.append(row)
 
-csv_path = os.path.join(output_dir, "inlier_results.csv")
+csv_path = os.path.join(output_dir, "homographies_loftr.csv")
 df = pd.DataFrame(results)
 df.to_csv(csv_path, index=False)
-print(f"\n All done. CSV saved at: {csv_path}")
-
+print(f"Homography CSV saved at: {csv_path}")
