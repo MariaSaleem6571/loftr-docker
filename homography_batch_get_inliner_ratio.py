@@ -1,71 +1,117 @@
-import cv2
 import numpy as np
+import torch
 import os
-import uuid
+import cv2
 import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib import cm
+import kornia as K
+import kornia.feature as KF
+
+def load_image_cv(path):
+    print("Loading:", path)
+    img_cv = cv2.imread(path, cv2.IMREAD_COLOR)
+    if img_cv is None:
+        raise FileNotFoundError(f"Image not found: {path}")
+    img_cv = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
+    img_tensor = torch.from_numpy(img_cv).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+    return img_tensor
 
 image_dir = "images"
-output_csv = "homographies_batch4_v4_new.csv"
-image_files = sorted([f for f in os.listdir(image_dir) if f.lower().endswith((".png", ".jpg", ".jpeg"))])
+output_dir = "output_batch_4_v4"
+os.makedirs(output_dir, exist_ok=True)
 
-MIN_MATCH_COUNT = 10
+image_files = sorted(f for f in os.listdir(image_dir) if f.endswith(".png"))
+
+matcher = KF.LoFTR(pretrained="outdoor")
+
 results = []
-
+target_size = (480, 360)  # (height, width)
 
 for i in range(len(image_files) - 1):
-    img1_path = os.path.join(image_dir, image_files[i])
-    img2_path = os.path.join(image_dir, image_files[i + 1])
+    fname1 = os.path.join(image_dir, image_files[i])
+    fname2 = os.path.join(image_dir, image_files[i + 1])
 
+    img1 = load_image_cv(fname1)
+    img2 = load_image_cv(fname2)
 
-    img1 = cv2.imread(img1_path, cv2.IMREAD_GRAYSCALE)
-    img2 = cv2.imread(img2_path, cv2.IMREAD_GRAYSCALE)
+    img1 = K.geometry.resize(img1, target_size, antialias=True)
+    img2 = K.geometry.resize(img2, target_size, antialias=True)
 
-    if img1 is None or img2 is None:
-        print(f"Skipping {img1_path} or {img2_path} (cannot load)")
-        continue
+    input_dict = {
+        "image0": K.color.rgb_to_grayscale(img1),
+        "image1": K.color.rgb_to_grayscale(img2),
+    }
 
+    with torch.inference_mode():
+        correspondences = matcher(input_dict)
 
-    sift = cv2.SIFT_create()
-    kp1, des1 = sift.detectAndCompute(img1, None)
-    kp2, des2 = sift.detectAndCompute(img2, None)
+    mkpts0 = correspondences["keypoints0"].cpu().numpy()
+    mkpts1 = correspondences["keypoints1"].cpu().numpy()
+    conf = correspondences["confidence"].cpu().numpy()
 
-    FLANN_INDEX_KDTREE = 1
-    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
-    search_params = dict(checks=50)
-    flann = cv2.FlannBasedMatcher(index_params, search_params)
+    norm_conf = (conf - conf.min()) / (conf.max() - conf.min() + 1e-8)
+    colors = cm.viridis(norm_conf)[:, :3]
 
-    matches = flann.knnMatch(des1, des2, k=2)
-
-    good = [m for m, n in matches if m.distance < 0.7 * n.distance]
-
-    if len(good) > MIN_MATCH_COUNT:
-        src_pts = np.float32([kp1[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)  # from image1
-        dst_pts = np.float32([kp2[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)  # from image2
-
-        M, mask = cv2.findHomography(dst_pts, src_pts, cv2.RANSAC, 5.0)
-
-        if M is not None:
-            H4 = np.eye(4)
-            H4[:3, :3] = M[:3, :3]
-            H4[:3, 3] = M[:3, 2]
-
-            row = {
-                "uuid": str(uuid.uuid4()),
-                "image1_index": i + 1,
-                "image2_index": i + 2,
-                "pair_id": f"{os.path.splitext(image_files[i])[0]}_{os.path.splitext(image_files[i+1])[0]}",
-                "r11": H4[0, 0], "r12": H4[0, 1], "r13": H4[0, 2], "tx": H4[0, 3],
-                "r21": H4[1, 0], "r22": H4[1, 1], "r23": H4[1, 2], "ty": H4[1, 3],
-                "r31": H4[2, 0], "r32": H4[2, 1], "r33": H4[2, 2], "tz": H4[2, 3],
-                "h41": H4[3, 0], "h42": H4[3, 1], "h43": H4[3, 2], "h44": H4[3, 3],
-            }
-            results.append(row)
-        else:
-            print(f"No homography found for {image_files[i+1]} → {image_files[i]}")
+    if len(mkpts0) >= 8:
+        Fm, inliers = cv2.findFundamentalMat(mkpts0, mkpts1, cv2.USAC_MAGSAC, 0.5, 0.999, 100000)
+        inliers = inliers > 0
+        num_inliers = inliers.sum()
+        total_matches = len(inliers)
+        inlier_ratio = num_inliers / total_matches
     else:
-        print(f"Not enough matches for {image_files[i+1]} → {image_files[i]}")
+        inliers = np.zeros(len(mkpts0), dtype=bool)
+        num_inliers = 0
+        total_matches = len(mkpts0)
+        inlier_ratio = 0.0
 
+    print(f"{image_files[i]} ↔ {image_files[i + 1]} — Inliers: {num_inliers}/{total_matches} ({inlier_ratio:.2%})")
+
+    img1_np = (img1[0].permute(1,2,0).numpy()*255).astype(np.uint8)
+    img2_np = (img2[0].permute(1,2,0).numpy()*255).astype(np.uint8)
+
+    h1, w1, _ = img1_np.shape
+    h2, w2, _ = img2_np.shape
+    max_h = max(h1, h2)
+    total_w = w1 + w2
+    canvas = np.zeros((max_h, total_w, 3), dtype=np.uint8)
+    canvas[:h1, :w1, :] = img1_np
+    canvas[:h2, w1:w1+w2, :] = img2_np
+
+    fig, ax = plt.subplots(figsize=(total_w/100, max_h/100), dpi=100)
+    ax.imshow(canvas)
+    ax.set_xlabel("X (pixels)")
+    ax.set_ylabel("Y (pixels)")
+    ax.set_aspect('equal')  
+
+    for pt0, pt1, c in zip(mkpts0, mkpts1, colors):
+        x0, y0 = pt0
+        x1, y1 = pt1
+        x1 += w1  
+        ax.plot([x0, x1], [y0, y1], color=c, linewidth=1.0)
+
+    sm = plt.cm.ScalarMappable(cmap=cm.viridis, norm=plt.Normalize(vmin=conf.min(), vmax=conf.max()))
+    sm.set_array([])
+    cbar = plt.colorbar(sm, ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label("Match Confidence", fontsize=12)
+
+    pair_id = f"{image_files[i].replace('.png','')}_{image_files[i+1].replace('.png','')}"
+    out_img_path = os.path.join(output_dir, f"match_{pair_id}.png")
+    plt.savefig(out_img_path, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    
+
+    results.append({
+        "pair_id": pair_id,
+        "image_1": image_files[i],
+        "image_2": image_files[i+1],
+        "total_matches": total_matches,
+        "inlier_matches": num_inliers,
+        "inlier_ratio_percent": round(inlier_ratio * 100, 2)
+    })
+
+csv_path = os.path.join(output_dir, "loftr_match_results.csv")
 df = pd.DataFrame(results)
-df.to_csv(output_csv, index=False)
-print(f"Homographies saved to {output_csv}")
+df.to_csv(csv_path, index=False)
+print(f"Done! CSV saved at: {csv_path}")
 
